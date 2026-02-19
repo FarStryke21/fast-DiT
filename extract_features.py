@@ -40,9 +40,19 @@ from datasets import load_dataset
 
 class CelebAHFWrapper(torch.utils.data.Dataset):
     def __init__(self, transform):
-        # Load the exact dataset you specified for HW4
         self.hf_data = load_dataset("electronickale/cmu-10799-celeba64-subset", split='train')
         self.transform = transform
+        # We explicitly list the 40 attribute columns to extract
+        self.attr_names = [
+            '5_o_Clock_Shadow', 'Arched_Eyebrows', 'Attractive', 'Bags_Under_Eyes', 'Bald', 
+            'Bangs', 'Big_Lips', 'Big_Nose', 'Black_Hair', 'Blond_Hair', 'Blurry', 
+            'Brown_Hair', 'Bushy_Eyebrows', 'Chubby', 'Double_Chin', 'Eyeglasses', 
+            'Goatee', 'Gray_Hair', 'Heavy_Makeup', 'High_Cheekbones', 'Male', 
+            'Mouth_Slightly_Open', 'Mustache', 'Narrow_Eyes', 'No_Beard', 'Oval_Face', 
+            'Pale_Skin', 'Pointy_Nose', 'Receding_Hairline', 'Rosy_Cheeks', 'Sideburns', 
+            'Smiling', 'Straight_Hair', 'Wavy_Hair', 'Wearing_Earrings', 'Wearing_Hat', 
+            'Wearing_Lipstick', 'Wearing_Necklace', 'Wearing_Necktie', 'Young'
+        ]
         
     def __len__(self):
         return len(self.hf_data)
@@ -50,8 +60,13 @@ class CelebAHFWrapper(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         item = self.hf_data[idx]
         img = self.transform(item['image'].convert('RGB'))
-        # Force the labels into a 40-dim float tensor
-        labels = torch.tensor(item['labels'], dtype=torch.float32)
+        
+        # Grab all 40 attributes for this specific image and pack them into a list
+        label_list = [item[attr] for attr in self.attr_names]
+        
+        # Convert the list into our 40-dim float tensor
+        labels = torch.tensor(label_list, dtype=torch.float32)
+        
         return img, labels
         
 @torch.no_grad()
