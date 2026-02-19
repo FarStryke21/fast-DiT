@@ -94,6 +94,35 @@ class LabelEmbedder(nn.Module):
         return embeddings
 
 
+class MultiLabelEmbedder(nn.Module):
+    """
+    Projects a 40-dimensional continuous/binary attribute vector into the DiT hidden dimension.
+    """
+    def __init__(self, in_channels, hidden_size, dropout_prob):
+        super().__init__()
+        self.use_cfg_embedding = dropout_prob > 0
+        # Project the 40-dim vector into the Transformer's hidden dimension
+        self.mlp = nn.Sequential(
+            nn.Linear(in_channels, hidden_size),
+            nn.SiLU(),
+            nn.Linear(hidden_size, hidden_size)
+        )
+        # The unconditional (null) token used for CFG
+        self.null_token = nn.Parameter(torch.randn(1, in_channels))
+        self.dropout_prob = dropout_prob
+
+    def forward(self, labels, train, force_drop_ids=None):
+        use_dropout = self.dropout_prob > 0
+        if (train and use_dropout) or (force_drop_ids is not None):
+            # Apply classifier-free guidance dropout
+            drop_ids = torch.rand(labels.shape[0], device=labels.device) < self.dropout_prob
+            if force_drop_ids is not None:
+                drop_ids = force_drop_ids
+            # Replace dropped vectors with the null token
+            labels = torch.where(drop_ids[:, None], self.null_token, labels)
+            
+        return self.mlp(labels)
+
 #################################################################################
 #                                 Core DiT Model                                #
 #################################################################################
@@ -168,7 +197,8 @@ class DiT(nn.Module):
 
         self.x_embedder = PatchEmbed(input_size, patch_size, in_channels, hidden_size, bias=True)
         self.t_embedder = TimestepEmbedder(hidden_size)
-        self.y_embedder = LabelEmbedder(num_classes, hidden_size, class_dropout_prob)
+        # Modified for CelebA 40-dim attributes
+        self.y_embedder = MultiLabelEmbedder(in_channels=40, hidden_size=hidden_size, dropout_prob=class_dropout_prob)
         num_patches = self.x_embedder.num_patches
         # Will use fixed sin-cos embedding:
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, hidden_size), requires_grad=False)

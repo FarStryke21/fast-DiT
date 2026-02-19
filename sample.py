@@ -35,7 +35,7 @@ def main(args):
         input_size=latent_size,
         num_classes=args.num_classes
     ).to(device)
-    # Auto-download a pre-trained model or load a custom DiT checkpoint from train.py:
+    # Auto-download a pre-trained model or load a custom DiTs checkpoint from train.py:
     ckpt_path = args.ckpt or f"DiT-XL-2-{args.image_size}x{args.image_size}.pt"
     state_dict = find_model(ckpt_path)
     model.load_state_dict(state_dict)

@@ -31,12 +31,29 @@ from tqdm import tqdm
 from models import DiT_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
+from datasets import load_dataset
 
 
 #################################################################################
 #                             Training Helper Functions                         #
 #################################################################################
 
+class CelebAHFWrapper(torch.utils.data.Dataset):
+    def __init__(self, transform):
+        # Load the exact dataset you specified for HW4
+        self.hf_data = load_dataset("electronickale/cmu-10799-celeba64-subset", split='train')
+        self.transform = transform
+        
+    def __len__(self):
+        return len(self.hf_data)
+        
+    def __getitem__(self, idx):
+        item = self.hf_data[idx]
+        img = self.transform(item['image'].convert('RGB'))
+        # Force the labels into a 40-dim float tensor
+        labels = torch.tensor(item['labels'], dtype=torch.float32)
+        return img, labels
+        
 @torch.no_grad()
 def update_ema(ema_model, model, decay=0.9999):
     """
@@ -143,7 +160,7 @@ def main(args):
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
     ])
-    dataset = ImageFolder(args.data_path, transform=transform)
+    dataset = CelebAHFWrapper(transform=transform)
     sampler = DistributedSampler(
         dataset,
         num_replicas=dist.get_world_size(),
@@ -187,12 +204,12 @@ def main(args):
 if __name__ == "__main__":
     # Default args here will train DiT-XL/2 with the hyperparameters we used in our paper (except training iters).
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-path", type=str, required=True)
+    parser.add_argument("--data-path", type=str, default="./dummy")
     parser.add_argument("--features-path", type=str, default="features")
     parser.add_argument("--results-dir", type=str, default="results")
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
-    parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
-    parser.add_argument("--num-classes", type=int, default=1000)
+    parser.add_argument("--image-size", type=int, choices=[64, 256, 512], default=64)
+    parser.add_argument("--num-classes", type=int, default=40)
     parser.add_argument("--epochs", type=int, default=1400)
     parser.add_argument("--global-batch-size", type=int, default=256)
     parser.add_argument("--global-seed", type=int, default=0)

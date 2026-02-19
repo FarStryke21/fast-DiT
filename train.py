@@ -197,10 +197,36 @@ def main(args):
             y = y.to(device)
             x = x.squeeze(dim=1)
             y = y.squeeze(dim=1)
-            t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)
-            model_kwargs = dict(y=y)
-            loss_dict = diffusion.training_losses(model, x, t, model_kwargs)
-            loss = loss_dict["loss"].mean()
+
+            # ------------------------Flow Matching Training Step------------------------
+            # 1. Prepare data and noise
+            x_1 = x  # The clean VAE latents from the pre-extracted dataset
+            x_0 = torch.randn_like(x_1) # Pure Gaussian noise
+            y = y.float() # Ensure labels are 40-dim float tensors for our MLP
+
+            # 2. Sample random continuous timesteps t ~ U(0, 1)
+            t = torch.rand(x_1.shape[0], 1, 1, 1, device=device)
+
+            # 3. Construct the straight-line probability path
+            x_t = (1 - t) * x_0 + t * x_1
+
+            # 4. Calculate the ground-truth velocity (the straight vector from noise to data)
+            v_target = x_1 - x_0
+
+            # 5. Predict the velocity using the DiT
+            # We squeeze t so it matches the DiT's expected 1D time tensor shape
+            v_pred = model(x_t, t.squeeze(), y)
+
+            # 6. Flow Matching Loss: MSE between predicted and target velocity
+            loss = torch.nn.functional.mse_loss(v_pred, v_target)
+            # --------------------------------------------------------------------------------
+            # --------------Original DDPM Training Step (for reference)--------------
+            # t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)
+            # model_kwargs = dict(y=y)
+            # loss_dict = diffusion.training_losses(model, x, t, model_kwargs)
+            # loss = loss_dict["loss"].mean()
+            # --------------------------------------------------------------------------------
+
             opt.zero_grad()
             accelerator.backward(loss)
             opt.step()
@@ -254,8 +280,8 @@ if __name__ == "__main__":
     parser.add_argument("--feature-path", type=str, default="features")
     parser.add_argument("--results-dir", type=str, default="results")
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
-    parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
-    parser.add_argument("--num-classes", type=int, default=1000)
+    parser.add_argument("--image-size", type=int, choices=[64, 256, 512], default=64)
+    parser.add_argument("--num-classes", type=int, default=40) # Modified for CelebA 40-dim attributes.
     parser.add_argument("--epochs", type=int, default=1400)
     parser.add_argument("--global-batch-size", type=int, default=256)
     parser.add_argument("--global-seed", type=int, default=0)
