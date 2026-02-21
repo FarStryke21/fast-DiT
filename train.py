@@ -126,6 +126,8 @@ def main(args):
     """
     assert torch.cuda.is_available(), "Training currently requires at least one GPU."
 
+    print(f"Starting training with args: {args}")
+
     # Setup accelerator:
     accelerator = Accelerator()
     device = accelerator.device
@@ -216,6 +218,7 @@ def main(args):
             # 5. Predict the velocity using the DiT
             # We squeeze t so it matches the DiT's expected 1D time tensor shape
             v_pred = model(x_t, t.squeeze(), y)
+            v_pred, _ = v_pred.chunk(2, dim=1)
 
             # 6. Flow Matching Loss: MSE between predicted and target velocity
             loss = torch.nn.functional.mse_loss(v_pred, v_target)
@@ -258,7 +261,7 @@ def main(args):
             if train_steps % args.ckpt_every == 0 and train_steps > 0:
                 if accelerator.is_main_process:
                     checkpoint = {
-                        "model": model.module.state_dict(),
+                        "model": model.module.state_dict() if hasattr(model, "module") else model.state_dict(),
                         "ema": ema.state_dict(),
                         "opt": opt.state_dict(),
                         "args": args
@@ -268,10 +271,25 @@ def main(args):
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
 
     model.eval()  # important! This disables randomized embedding dropout
+    if rank == 0:
+        checkpoint = {
+            # Using the same dynamic wrapper check we added earlier!
+            "model": model.module.state_dict() if hasattr(model, "module") else model.state_dict(),
+            "ema": ema.state_dict(),
+            "opt": opt.state_dict(),
+            "args": args
+        }
+        # Name it specifically so you know it is the completed run
+        checkpoint_path = f"{checkpoint_dir}/final-checkpoint.pt"
+        torch.save(checkpoint, checkpoint_path)
+        logger.info(f"Saved final checkpoint to {checkpoint_path}")
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
     
     if accelerator.is_main_process:
         logger.info("Done!")
+
+    dist.barrier()
+    dist.destroy_process_group()
 
 
 if __name__ == "__main__":
@@ -282,12 +300,12 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
     parser.add_argument("--image-size", type=int, choices=[64, 256, 512], default=64)
     parser.add_argument("--num-classes", type=int, default=40) # Modified for CelebA 40-dim attributes.
-    parser.add_argument("--epochs", type=int, default=1400)
-    parser.add_argument("--global-batch-size", type=int, default=256)
+    parser.add_argument("--epochs", type=int, default=1000)
+    parser.add_argument("--global-batch-size", type=int, default=2048)
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=4)
-    parser.add_argument("--log-every", type=int, default=100)
-    parser.add_argument("--ckpt-every", type=int, default=50_000)
+    parser.add_argument("--log-every", type=int, default=30)
+    parser.add_argument("--ckpt-every", type=int, default=3000)
     args = parser.parse_args()
     main(args)
