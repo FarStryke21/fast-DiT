@@ -266,7 +266,7 @@ class DiT(nn.Module):
             return outputs
         return ckpt_forward
 
-    def forward(self, x, t, y):
+    def forward(self, x, t, y, force_drop_ids=None):
         """
         Forward pass of DiT.
         x: (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
@@ -275,7 +275,7 @@ class DiT(nn.Module):
         """
         x = self.x_embedder(x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
         t = self.t_embedder(t)                   # (N, D)
-        y = self.y_embedder(y, self.training)    # (N, D)
+        y = self.y_embedder(y, self.training, force_drop_ids=force_drop_ids)    # (N, D)
         c = t + y                                # (N, D)
         for block in self.blocks:
             x = torch.utils.checkpoint.checkpoint(self.ckpt_wrapper(block), x, c)       # (N, T, D)

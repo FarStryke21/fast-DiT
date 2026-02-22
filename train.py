@@ -67,7 +67,8 @@ def create_logger(logging_dir):
         level=logging.INFO,
         format='[\033[34m%(asctime)s\033[0m] %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
-        handlers=[logging.StreamHandler(), logging.FileHandler(f"{logging_dir}/log.txt")]
+        # Explicitly use mode='a' to append to the log file instead of overwriting it
+        handlers=[logging.StreamHandler(), logging.FileHandler(f"{logging_dir}/log.txt", mode='a')]
     )
     logger = logging.getLogger(__name__)
     return logger
@@ -134,14 +135,21 @@ def main(args):
 
     # Setup an experiment folder:
     if accelerator.is_main_process:
-        os.makedirs(args.results_dir, exist_ok=True)  # Make results folder (holds all experiment subfolders)
-        experiment_index = len(glob(f"{args.results_dir}/*"))
-        model_string_name = args.model.replace("/", "-")  # e.g., DiT-XL/2 --> DiT-XL-2 (for naming folders)
-        experiment_dir = f"{args.results_dir}/{experiment_index:03d}-{model_string_name}"  # Create an experiment folder
-        checkpoint_dir = f"{experiment_dir}/checkpoints"  # Stores saved model checkpoints
-        os.makedirs(checkpoint_dir, exist_ok=True)
-        logger = create_logger(experiment_dir)
-        logger.info(f"Experiment directory created at {experiment_dir}")
+        if args.resume_from:
+            # Extract the existing checkpoint_dir and experiment_dir from the path
+            checkpoint_dir = os.path.dirname(args.resume_from)
+            experiment_dir = os.path.dirname(checkpoint_dir)
+            logger = create_logger(experiment_dir)
+            logger.info(f"Resuming experiment at {experiment_dir}. Appending to existing logs.")
+        else:
+            os.makedirs(args.results_dir, exist_ok=True)  # Make results folder (holds all experiment subfolders)
+            experiment_index = len(glob(f"{args.results_dir}/*"))
+            model_string_name = args.model.replace("/", "-")  # e.g., DiT-XL/2 --> DiT-XL-2 (for naming folders)
+            experiment_dir = f"{args.results_dir}/{experiment_index:03d}-{model_string_name}"  # Create an experiment folder
+            checkpoint_dir = f"{experiment_dir}/checkpoints"  # Stores saved model checkpoints
+            os.makedirs(checkpoint_dir, exist_ok=True)
+            logger = create_logger(experiment_dir)
+            logger.info(f"Experiment directory created at {experiment_dir}")
 
     # Create model:
     assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
@@ -177,21 +185,54 @@ def main(args):
     if accelerator.is_main_process:
         logger.info(f"Dataset contains {len(dataset):,} images ({args.feature_path})")
 
+    # Variables for monitoring/logging purposes:
+    train_steps = 0
+    start_epoch = 0
+
+    # Load states if resuming
+    if args.resume_from:
+        if accelerator.is_main_process:
+            logger.info(f"Loading checkpoint from {args.resume_from}...")
+        
+        # weights_only=False bypasses the PyTorch 2.6 security check for saved namespaces
+        checkpoint = torch.load(args.resume_from, map_location="cpu", weights_only=False)
+        model.load_state_dict(checkpoint["model"])
+        ema.load_state_dict(checkpoint["ema"])
+        opt.load_state_dict(checkpoint["opt"])
+        
+        # Extract the step count
+        filename = os.path.basename(args.resume_from)
+        try:
+            if "final" in filename:
+                train_steps = args.epochs * len(loader)
+            else:
+                train_steps = int(filename.split('.')[0])
+        except ValueError:
+            train_steps = 0
+            
+        # Calculate exactly which epoch to start from based on steps
+        start_epoch = train_steps // len(loader)
+        
+        if accelerator.is_main_process:
+            logger.info(f"Resumed successfully at Step {train_steps} (Epoch {start_epoch})")
+
     # Prepare models for training:
-    update_ema(ema, model, decay=0)  # Ensure EMA is initialized with synced weights
+    if not args.resume_from:
+        update_ema(ema, model, decay=0)  # Ensure EMA is initialized with synced weights if starting fresh
+        
     model.train()  # important! This enables embedding dropout for classifier-free guidance
     ema.eval()  # EMA model should always be in eval mode
     model, opt, loader = accelerator.prepare(model, opt, loader)
 
-    # Variables for monitoring/logging purposes:
-    train_steps = 0
     log_steps = 0
     running_loss = 0
     start_time = time()
     
     if accelerator.is_main_process:
-        logger.info(f"Training for {args.epochs} epochs...")
-    for epoch in range(args.epochs):
+        logger.info(f"Training to {args.epochs} total epochs...")
+        
+    # Start loop from the calculated start_epoch
+    for epoch in range(start_epoch, args.epochs):
         if accelerator.is_main_process:
             logger.info(f"Beginning epoch {epoch}...")
         for x, y in loader:
@@ -223,12 +264,6 @@ def main(args):
             # 6. Flow Matching Loss: MSE between predicted and target velocity
             loss = torch.nn.functional.mse_loss(v_pred, v_target)
             # --------------------------------------------------------------------------------
-            # --------------Original DDPM Training Step (for reference)--------------
-            # t = torch.randint(0, diffusion.num_timesteps, (x.shape[0],), device=device)
-            # model_kwargs = dict(y=y)
-            # loss_dict = diffusion.training_losses(model, x, t, model_kwargs)
-            # loss = loss_dict["loss"].mean()
-            # --------------------------------------------------------------------------------
 
             opt.zero_grad()
             accelerator.backward(loss)
@@ -239,6 +274,7 @@ def main(args):
             running_loss += loss.item()
             log_steps += 1
             train_steps += 1
+            
             if train_steps % args.log_every == 0:
                 # Measure training speed:
                 torch.cuda.synchronize()
@@ -271,9 +307,10 @@ def main(args):
                     logger.info(f"Saved checkpoint to {checkpoint_path}")
 
     model.eval()  # important! This disables randomized embedding dropout
-    if rank == 0:
+    
+    # Bug Fix: Ensure this uses accelerator.is_main_process instead of rank == 0
+    if accelerator.is_main_process:
         checkpoint = {
-            # Using the same dynamic wrapper check we added earlier!
             "model": model.module.state_dict() if hasattr(model, "module") else model.state_dict(),
             "ema": ema.state_dict(),
             "opt": opt.state_dict(),
@@ -283,13 +320,14 @@ def main(args):
         checkpoint_path = f"{checkpoint_dir}/final-checkpoint.pt"
         torch.save(checkpoint, checkpoint_path)
         logger.info(f"Saved final checkpoint to {checkpoint_path}")
-    # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
     
     if accelerator.is_main_process:
         logger.info("Done!")
 
-    dist.barrier()
-    dist.destroy_process_group()
+    # Safely teardown
+    if dist.is_initialized():
+        dist.barrier()
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
@@ -300,12 +338,13 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
     parser.add_argument("--image-size", type=int, choices=[64, 256, 512], default=64)
     parser.add_argument("--num-classes", type=int, default=40) # Modified for CelebA 40-dim attributes.
-    parser.add_argument("--epochs", type=int, default=1000)
+    parser.add_argument("--epochs", type=int, default=2000)
     parser.add_argument("--global-batch-size", type=int, default=2048)
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--log-every", type=int, default=30)
     parser.add_argument("--ckpt-every", type=int, default=3000)
+    parser.add_argument("--resume-from", type=str, default=None, help="Path to a .pt checkpoint to resume training from (default: None)")
     args = parser.parse_args()
     main(args)
