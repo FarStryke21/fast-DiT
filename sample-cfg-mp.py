@@ -63,7 +63,7 @@ def main(args):
     dt = 1.0 / args.num_steps
 
     print(f"Generating {args.n} images with attributes: {args.attributes}")
-    print(f"Using Vanilla CFG Scale: {args.cfg_scale}, Steps: {args.num_steps}")
+    print(f"Using Method: {args.mp_method.upper()} | CFG Scale: {args.cfg_scale} | Steps: {args.num_steps}")
 
     # 4. The Euler ODE Solver (Flow Matching generation)
     for i in range(args.num_steps):
@@ -84,7 +84,7 @@ def main(args):
         # Forward pass
         v_batched = model(z_batched, t_batched, y_batched, force_drop_ids=drop_ids)
         
-        # Slice off the extra variance channels (DiT output is 8 channels, Flow Matching uses 4)
+        # Slice off the extra variance channels
         v_batched, _ = v_batched.chunk(2, dim=1)
         
         # Split back into conditional and unconditional velocities
@@ -92,9 +92,59 @@ def main(args):
         
         # Apply standard Vanilla CFG
         v_cfg = v_uncond + args.cfg_scale * (v_cond - v_uncond)
+
+        # ---------------------------------------------------------
+        # PREDICTOR STEP
+        # ---------------------------------------------------------
+        x = z + v_cfg * dt  # Euler step forward
         
-        # Euler step forward
-        z = z + v_cfg * dt
+        # Setup time and drop_ids for the corrector evaluations
+        t_next_val = (i + 1) / args.num_steps
+        t_next = torch.full((args.n,), t_next_val, device=device)
+        drop_ids_proj = torch.ones(args.n, dtype=torch.bool, device=device)
+
+        # ---------------------------------------------------------
+        # CORRECTOR STEP (Manifold Projection)
+        # ---------------------------------------------------------
+        if args.mp_method == "standard":
+            # Standard iterative projection (Requires K-1 extra evaluations)
+            for k in range(1, args.proj_K):
+                v_proj = model(x, t_next, y_uncond, force_drop_ids=drop_ids_proj) 
+                v_proj, _ = v_proj.chunk(2, dim=1)
+                
+                # Nudge the latent back toward the unconditional manifold
+                x = x + (v_proj - v_uncond) * dt * 0.5
+
+        elif args.mp_method == "anderson":
+            # Anderson Accelerated projection (Requires exactly 2 extra evaluations)
+            # Eval 1
+            v_proj_1 = model(x, t_next, y_uncond, force_drop_ids=drop_ids_proj)
+            v_proj_1, _ = v_proj_1.chunk(2, dim=1)
+            
+            g_1 = x + (v_proj_1 - v_uncond) * dt * 0.5
+            f_1 = g_1 - x
+
+            # Eval 2
+            v_proj_2 = model(g_1, t_next, y_uncond, force_drop_ids=drop_ids_proj)
+            v_proj_2, _ = v_proj_2.chunk(2, dim=1)
+            
+            g_2 = g_1 + (v_proj_2 - v_uncond) * dt * 0.5
+            f_2 = g_2 - g_1
+
+            # Anderson Mixing
+            delta_f = f_2 - f_1
+            f_2_flat = f_2.view(args.n, -1)
+            delta_f_flat = delta_f.view(args.n, -1)
+            
+            numerator = torch.sum(f_2_flat * delta_f_flat, dim=1)
+            denominator = torch.sum(delta_f_flat * delta_f_flat, dim=1) + 1e-8
+            alpha = (numerator / denominator).view(args.n, 1, 1, 1)
+            
+            # Extrapolate
+            x = g_2 - alpha * (g_2 - g_1)
+        
+        # Set the final corrected latent for the next ODE loop
+        z = x
 
     # 5. Decode the final latent back into pixels
     print("Decoding latents...")
@@ -104,7 +154,7 @@ def main(args):
     # 6. Save the image grid
     grid_size = int(args.n ** 0.5)
     safe_name = "_".join(args.attributes) if args.attributes else "unconditional"
-    filename = f"vanilla_cfg_{safe_name}.png"
+    filename = f"cfg_mp_{args.mp_method}_{safe_name}.png"
     
     save_image(samples, filename, nrow=grid_size, normalize=True, value_range=(-1, 1))
     print(f"Saved generated grid to {filename}")
@@ -120,5 +170,7 @@ if __name__ == "__main__":
     parser.add_argument("--cfg-scale", type=float, default=4.0, help="Classifier-Free Guidance scale")
     parser.add_argument("--num-steps", type=int, default=50, help="Number of Euler integration steps")
     parser.add_argument("--seed", type=int, default=50, help="Random seed for reproducibility")
+    parser.add_argument("--mp-method", type=str, choices=["standard", "anderson"], default="standard", help="Which manifold projection method to use")
+    parser.add_argument("--proj-K", type=int, default=3, help="Number of projection steps (only used if mp-method is 'standard')")
     args = parser.parse_args()
     main(args)

@@ -118,7 +118,7 @@ if __name__ == "__main__":
     parser.add_argument("--attributes", type=str, nargs='+', help="List of attributes (e.g., Male Eyeglasses Smiling)")
     parser.add_argument("--n", type=int, default=16, help="Number of images to generate in the grid")
     parser.add_argument("--cfg-scale", type=float, default=4.0, help="Classifier-Free Guidance scale")
-    parser.add_argument("--num-steps", type=int, default=50, help="Number of Euler integration steps")
+    parser.add_argument("--num-steps", type=int, default=100, help="Number of Euler integration steps")
     parser.add_argument("--seed", type=int, default=50, help="Random seed for reproducibility")
     args = parser.parse_args()
     main(args)
