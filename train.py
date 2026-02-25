@@ -32,6 +32,8 @@ from models import DiT_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
 
+from dataset import create_dataloader
+
 
 #################################################################################
 #                             Training Helper Functions                         #
@@ -155,7 +157,8 @@ def main(args):
     assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
     latent_size = args.image_size // 8
     model = DiT_models[args.model](
-        input_size=latent_size,
+        input_size=args.image_size,
+        in_channels=3,
         num_classes=args.num_classes
     )
     # Note that parameter initialization is done within the DiT constructor
@@ -163,7 +166,7 @@ def main(args):
     ema = deepcopy(model).to(device)  # Create an EMA of the model for use after training
     requires_grad(ema, False)
     diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
-    vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
+    # vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     if accelerator.is_main_process:
         logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
@@ -171,19 +174,24 @@ def main(args):
     opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0)
 
     # Setup data:
-    features_dir = f"{args.feature_path}/imagenet256_features"
-    labels_dir = f"{args.feature_path}/imagenet256_labels"
-    dataset = CustomDataset(features_dir, labels_dir)
-    loader = DataLoader(
-        dataset,
+    if accelerator.is_main_process:
+        logger.info("Loading CelebA dataset...")
+
+    # This replaces both the dataset and dataloader initialization
+    loader = create_dataloader(
+        root=args.feature_path,        # Uses the path passed via arguments
+        split="train",
+        image_size=args.image_size,    # Will be 64
         batch_size=int(args.global_batch_size // accelerator.num_processes),
-        shuffle=True,
         num_workers=args.num_workers,
         pin_memory=True,
-        drop_last=True
+        augment=True,                  # Enables the RandomHorizontalFlip
+        from_hub=True,                 # Set to True to pull from HF
+        repo_name="electronickale/cmu-10799-celeba64-subset"
     )
+
     if accelerator.is_main_process:
-        logger.info(f"Dataset contains {len(dataset):,} images ({args.feature_path})")
+        logger.info(f"Dataset loaded successfully.")
 
     # Variables for monitoring/logging purposes:
     train_steps = 0
@@ -238,8 +246,6 @@ def main(args):
         for x, y in loader:
             x = x.to(device)
             y = y.to(device)
-            x = x.squeeze(dim=1)
-            y = y.squeeze(dim=1)
 
             # ------------------------Flow Matching Training Step------------------------
             # 1. Prepare data and noise
