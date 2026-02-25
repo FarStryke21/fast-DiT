@@ -224,13 +224,14 @@ def main(args):
         if accelerator.is_main_process:
             logger.info(f"Resumed successfully at Step {train_steps} (Epoch {start_epoch})")
 
-    # Prepare models for training:
-    if not args.resume_from:
-        update_ema(ema, model, decay=0)  # Ensure EMA is initialized with synced weights if starting fresh
+    # Prepare models for training
         
     model.train()  # important! This enables embedding dropout for classifier-free guidance
     ema.eval()  # EMA model should always be in eval mode
     model, opt, loader = accelerator.prepare(model, opt, loader)
+
+    if not args.resume_from:
+        update_ema(ema, model, decay=0)  # Ensure EMA is initialized with synced weights if starting fresh
 
     log_steps = 0
     running_loss = 0
@@ -264,7 +265,7 @@ def main(args):
 
             # 5. Predict the velocity using the DiT
             # We squeeze t so it matches the DiT's expected 1D time tensor shape
-            v_pred = model(x_t, t.squeeze(), y)
+            v_pred = model(x_t, t.view(-1), y)
             v_pred, _ = v_pred.chunk(2, dim=1)
 
             # 6. Flow Matching Loss: MSE between predicted and target velocity
@@ -287,13 +288,12 @@ def main(args):
                 end_time = time()
                 steps_per_sec = log_steps / (end_time - start_time)
                 avg_loss = torch.tensor(running_loss / log_steps, device=device)
-                avg_loss = avg_loss.item() / accelerator.num_processes
-
-                avg_loss = torch.tensor(avg_loss, device=accelerator.device)
-                avg_loss = accelerator.reduce(avg_loss, reduction="sum")
-
+                avg_loss = accelerator.reduce(avg_loss, reduction="mean")
+                
                 if accelerator.is_main_process:
-                    logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
+                    # Only call .item() at the very end when printing!
+                    logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss.item():.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
+                    
                 # Reset monitoring variables:
                 running_loss = 0
                 log_steps = 0
