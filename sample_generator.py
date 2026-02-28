@@ -5,19 +5,6 @@ import json
 from tqdm import tqdm
 from torchvision.utils import save_image
 from models import DiT_models 
-# Import your dataset to sample realistic conditions
-from dataset import create_dataloader 
-
-ATTR_NAMES = [
-    '5_o_Clock_Shadow', 'Arched_Eyebrows', 'Attractive', 'Bags_Under_Eyes', 'Bald', 
-    'Bangs', 'Big_Lips', 'Big_Nose', 'Black_Hair', 'Blond_Hair', 'Blurry', 
-    'Brown_Hair', 'Bushy_Eyebrows', 'Chubby', 'Double_Chin', 'Eyeglasses', 
-    'Goatee', 'Gray_Hair', 'Heavy_Makeup', 'High_Cheekbones', 'Male', 
-    'Mouth_Slightly_Open', 'Mustache', 'Narrow_Eyes', 'No_Beard', 'Oval_Face', 
-    'Pale_Skin', 'Pointy_Nose', 'Receding_Hairline', 'Rosy_Cheeks', 'Sideburns', 
-    'Smiling', 'Straight_Hair', 'Wavy_Hair', 'Wearing_Earrings', 'Wearing_Hat', 
-    'Wearing_Lipstick', 'Wearing_Necklace', 'Wearing_Necktie', 'Young'
-]
 
 def main(args):
     torch.manual_seed(args.seed)
@@ -26,7 +13,8 @@ def main(args):
 
     # Create output directory
     out_dir = f"samples_{args.method}_w{args.cfg_scale}_steps{args.num_steps}"
-    os.makedirs(out_dir, exist_ok=True)
+    fake_dir = os.path.join(out_dir, "fake")
+    os.makedirs(fake_dir, exist_ok=True)
 
     # Load Model
     print(f"Loading model from {args.ckpt}...")
@@ -35,38 +23,30 @@ def main(args):
     model.load_state_dict(state_dict["ema"] if "ema" in state_dict else state_dict)
     model.eval()
 
-    # Load local dataset just to grab realistic 40-dim attribute vectors for our targets
-    print("Loading local dataset for realistic target attributes...")
-    loader = create_dataloader(root=args.data_path, split="train", image_size=args.image_size, batch_size=args.batch_size, augment=False, shuffle=True)
-    loader_iter = iter(loader)
+    # Load real attributes and sample randomly
+    print(f"Loading real attributes from {args.attr_path}...")
+    all_real_y = torch.load(args.attr_path)
+    
+    # Randomly select N attribute combinations
+    indices = torch.randperm(len(all_real_y))[:args.num_samples]
+    target_conditions = all_real_y[indices]
 
     total_generated = 0
-    saved_conditions = []
     nfe_total = 0
 
     print(f"Starting generation of {args.num_samples} samples using method: {args.method.upper()}")
 
     with tqdm(total=args.num_samples) as pbar:
         while total_generated < args.num_samples:
-            # Determine batch size for this iteration
             current_batch_size = min(args.batch_size, args.num_samples - total_generated)
             
-            # Get real conditions from dataset
-            try:
-                _, real_y = next(loader_iter)
-            except StopIteration:
-                loader_iter = iter(loader)
-                _, real_y = next(loader_iter)
-            
-            y_cond = real_y[:current_batch_size].to(device)
+            # Slice the pre-selected conditions for this batch
+            y_cond = target_conditions[total_generated : total_generated + current_batch_size].to(device)
             y_uncond = torch.zeros_like(y_cond).to(device)
             
-            # Force unconditional if method is uncond
             if args.method == "uncond":
                 y_cond = y_uncond
                 
-            saved_conditions.append(y_cond.cpu())
-
             z = torch.randn(current_batch_size, 3, args.image_size, args.image_size, device=device)
             dt = 1.0 / args.num_steps
 
@@ -93,9 +73,9 @@ def main(args):
                     
                     v_cfg = v_uncond_out + args.cfg_scale * (v_cond - v_uncond_out)
                     x = z + v_cfg * dt
-                    nfe_total += 2 * current_batch_size # 2 passes for CFG
+                    nfe_total += 2 * current_batch_size
 
-                # Corrector Step (Manifold Projection)
+                # Corrector Step
                 is_in_gate = args.tmin <= t_val <= args.tmax
                 
                 if args.method in ["cfg_mp_std", "cfg_mp_anderson"] or (args.method == "cfg_mp_anderson_gated" and is_in_gate):
@@ -126,24 +106,23 @@ def main(args):
                                 (torch.sum(delta_f.view(current_batch_size, -1) * delta_f.view(current_batch_size, -1), dim=1) + 1e-8)).view(current_batch_size, 1, 1, 1)
                         
                         x = g_2 - alpha * (g_2 - g_1)
-                        nfe_total += 2 * current_batch_size # 2 evals for Anderson
+                        nfe_total += 2 * current_batch_size 
 
                 z = x
 
-            # Save individual images
+            # Save FAKE images
             samples = torch.clamp((z + 1.0) / 2.0, 0.0, 1.0)
             for j in range(current_batch_size):
-                save_image(samples[j], os.path.join(out_dir, f"{total_generated + j:05d}.png"))
+                save_image(samples[j], os.path.join(fake_dir, f"{total_generated + j:05d}.png"))
                 
             total_generated += current_batch_size
             pbar.update(current_batch_size)
 
-    # Save conditions for the classifier eval
-    torch.save(torch.cat(saved_conditions, dim=0), os.path.join(out_dir, "conditions.pt"))
+    # Save the exact conditions used in this run for the classifier eval
+    torch.save(target_conditions, os.path.join(out_dir, "conditions.pt"))
     
-    # --- NEW: LOGGING NFE METRICS ---
+    # Logging NFE Metrics
     avg_nfe = nfe_total / args.num_samples
-    
     stats = {
         "method": args.method,
         "num_samples": args.num_samples,
@@ -154,7 +133,7 @@ def main(args):
     }
     
     if "mp" in args.method:
-        stats["proj_K"] = args.proj_K if args.method == "cfg_mp_std" else 2 # Anderson uses exactly 2
+        stats["proj_K"] = args.proj_K if args.method == "cfg_mp_std" else 2 
     if "gated" in args.method:
         stats["tmin"] = args.tmin
         stats["tmax"] = args.tmax
@@ -165,13 +144,12 @@ def main(args):
         
     print(f"\nGeneration Complete! Saved to: {out_dir}")
     print(f"Average NFE per sample: {avg_nfe}")
-    print(f"Stats logged to: {log_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--method", type=str, choices=["uncond", "cfg", "cfg_mp_std", "cfg_mp_anderson", "cfg_mp_anderson_gated"], required=True)
     parser.add_argument("--ckpt", type=str, required=True)
-    parser.add_argument("--data-path", type=str, required=True, help="Path to local CelebA for sampling real targets")
+    parser.add_argument("--attr-path", type=str, default="./data/local_celeba/attributes.pt", help="Path to the extracted attributes tensor")
     parser.add_argument("--num-samples", type=int, default=1000)
     parser.add_argument("--batch-size", type=int, default=100)
     parser.add_argument("--cfg-scale", type=float, default=4.0)
