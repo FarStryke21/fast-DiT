@@ -59,17 +59,58 @@ class CelebADataset(Dataset):
         self.from_hub = from_hub
         self.repo_name = repo_name
 
-        # Build transforms
-        self.transform = self._build_transforms() # TODO write your own image transform function
-        
-        # For the attributes
-        self.attr = None
-
         # Load dataset based on mode
         if from_hub:
             self._load_from_hub()
         else:
             self._load_from_local()
+
+        print("Pre-processing and baking dataset into a massive RAM Tensor...")
+        
+        # Create a static transform for the heavy lifting
+        static_transform = transforms.Compose([
+            transforms.Resize(self.image_size),
+            transforms.CenterCrop(self.image_size),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])
+
+        cached_images_list = []
+        cached_labels_list = []
+        
+        for idx in range(len(self.data)):
+            item = self.data[idx]
+            
+            # Load raw image
+            if self.from_hub:
+                image = item["image"]
+            else:
+                image = Image.open(item["image"]).convert("RGB")
+            
+            # Apply the heavy transforms ONCE and store as a PyTorch Tensor
+            image = static_transform(image)
+            labels = self.attr[idx] if self.attr is not None else torch.zeros(40, dtype=torch.float32)
+            
+            cached_images_list.append(image)
+            cached_labels_list.append(labels)
+            
+        # Stack lists into massive contiguous PyTorch Tensors for zero-overhead indexing
+        self.cached_images = torch.stack(cached_images_list)
+        self.cached_labels = torch.stack(cached_labels_list)
+        
+        print(f"Tensor Cache complete! Memory used: {self.cached_images.element_size() * self.cached_images.nelement() / (1024**3):.2f} GB")
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        # Instantly grab the pre-processed tensor
+        image = self.cached_images[idx]
+        labels = self.cached_labels[idx]
+        
+        # Apply ultra-fast native Tensor augmentation on the fly
+        if self.augment and self.split == "train":
+            if torch.rand(1).item() < 0.5:
+                image = torch.flip(image, dims=[2]) # dim 2 is the width axis (C, H, W)
+                
+        return image, labels
 
     def _load_from_hub(self):
         """Load dataset from HuggingFace Hub or cached Arrow format."""
@@ -340,41 +381,6 @@ class CelebADataset(Dataset):
 
     def __len__(self) -> int:
         return len(self.data)
-
-    def __getitem__(self, idx: int) -> torch.Tensor:
-        """
-        Get a single image.
-
-        Args:
-            idx: Index of the image
-
-        Returns:
-            Image tensor of shape (3, image_size, image_size) in range [-1, 1]
-
-        Note:
-            We only return the image, not the attributes, since we're doing
-            unconditional generation.
-        """
-        item = self.data[idx]
-
-        # Load image
-        if self.from_hub:
-            # HuggingFace datasets provide PIL images directly
-            image = item["image"]
-        else:
-            # Local mode: load from file path
-            image = Image.open(item["image"]).convert("RGB")
-
-        if self.attr is not None:
-            labels = self.attr[idx]
-        else:
-            labels = torch.zeros(40, dtype=torch.float32)
-
-        # Apply transforms
-        if self.transform:
-            image = self.transform(image)
-
-        return image, labels
 
 
 def create_dataloader(

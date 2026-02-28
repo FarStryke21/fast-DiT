@@ -132,7 +132,7 @@ def main(args):
     print(f"Starting training with args: {args}")
 
     # Setup accelerator:
-    accelerator = Accelerator()
+    accelerator = Accelerator(mixed_precision="bf16")
     device = accelerator.device
 
     # Setup an experiment folder:
@@ -341,16 +341,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--feature-path", type=str, default="features")
     parser.add_argument("--results-dir", type=str, default="results")
-    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-XL/2")
+    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-B/2")
     parser.add_argument("--image-size", type=int, choices=[64, 256, 512], default=64)
     parser.add_argument("--num-classes", type=int, default=40) # Modified for CelebA 40-dim attributes.
-    parser.add_argument("--epochs", type=int, default=9000)
-    parser.add_argument("--global-batch-size", type=int, default=4096)
+    parser.add_argument("--epochs", type=int, default=3000)
+    parser.add_argument("--global-batch-size", type=int, default=256)
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
-    parser.add_argument("--num-workers", type=int, default=8)
-    parser.add_argument("--log-every", type=int, default=30)
-    parser.add_argument("--ckpt-every", type=int, default=12000)
+    parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--log-every", type=int, default=100)
+    parser.add_argument("--ckpt-every", type=int, default=6000)
     parser.add_argument("--resume-from", type=str, default=None, help="Path to a .pt checkpoint to resume training from (default: None)")
     args = parser.parse_args()
     main(args)
