@@ -11,7 +11,7 @@ def push_checkpoint_to_hub():
     create_repo(repo_id=repo_id, repo_type="model", exist_ok=True)
     
     # 3. Upload the checkpoint file
-    local_file_path = "results/000-DiT-B-2/checkpoints/final-checkpoint.pt"
+    local_file_path = "results/000-DiT-B-2/checkpoints/0100000.pt"
     hub_file_path = "final-checkpoint.pt"
     
     print(f"Uploading {local_file_path} to the Hub...")
