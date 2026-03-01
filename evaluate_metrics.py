@@ -116,6 +116,8 @@ if __name__ == "__main__":
     parser.add_argument("--fake-dir", type=str, required=True, help="Directory containing generated pngs")
     parser.add_argument("--real-dir", type=str, required=True, help="Path to your local CelebA 'real_images' folder")
     parser.add_argument("--classifier", type=str, required=True, help="Hugging Face repo id for your ResNet")
+    # --- UPDATED: Added out-dir argument ---
+    parser.add_argument("--out-dir", type=str, default=None, help="Force a specific output directory for the JSON")
     args = parser.parse_args()
     
     device = get_device()
@@ -131,8 +133,12 @@ if __name__ == "__main__":
         results["exact_match_accuracy"] = overall_acc
         results["elementwise_accuracy"] = elementwise_acc
         
-    parent_dir = os.path.dirname(os.path.normpath(args.fake_dir))
-    log_path = os.path.join(parent_dir, "evaluation_results.json")
+    # --- UPDATED LOGIC: Use out_dir if provided, otherwise default to parent ---
+    if args.out_dir:
+        log_path = os.path.join(args.out_dir, "evaluation_results.json")
+    else:
+        parent_dir = os.path.dirname(os.path.normpath(args.fake_dir))
+        log_path = os.path.join(parent_dir, "evaluation_results.json")
     
     with open(log_path, "w") as f:
         json.dump(results, f, indent=4)

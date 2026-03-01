@@ -11,8 +11,12 @@ def main(args):
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # Create output directory
-    out_dir = f"samples_{args.method}_w{args.cfg_scale}_steps{args.num_steps}"
+    # --- UPDATED LOGIC: Use out_dir if provided, otherwise default ---
+    if args.out_dir:
+        out_dir = args.out_dir
+    else:
+        out_dir = f"samples_{args.method}_w{args.cfg_scale}_steps{args.num_steps}"
+        
     fake_dir = os.path.join(out_dir, "fake")
     os.makedirs(fake_dir, exist_ok=True)
 
@@ -161,5 +165,7 @@ if __name__ == "__main__":
     parser.add_argument("--image-size", type=int, default=64)
     parser.add_argument("--num-classes", type=int, default=40)
     parser.add_argument("--seed", type=int, default=50)
+    # --- UPDATED: Added out-dir argument ---
+    parser.add_argument("--out-dir", type=str, default=None, help="Force a specific output directory")
     args = parser.parse_args()
     main(args)
