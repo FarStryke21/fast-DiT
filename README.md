@@ -35,19 +35,42 @@ where `v̄_∅` is the unconditional velocity already computed during the CFG pa
 |---|---|
 | `uncond` | none (unconditional baseline) |
 | `cfg` | none (vanilla CFG baseline) |
+| `cfg_interval` | none — competitor baseline: guidance applied only for `t ∈ [--w-tmin, --w-tmax]` (default `[0.3, 0.7]`), pure **conditional** velocity outside, so the uncond forward is skipped there (Kynkäänniemi et al., [arXiv:2404.07724](https://arxiv.org/abs/2404.07724)) |
+| `cfg_pp` | none — competitor baseline: our flow-matching analogue of CFG++ ([arXiv:2406.08070](https://arxiv.org/abs/2406.08070)); denoise to `x̂₁` with the guided velocity, renoise `x̂₀` with the **unconditional** one. `--cfg-scale` is λ ∈ (0,1] here (typical 0.2–0.8), **not** a large `w` |
 | `cfg_mp_std` | plain Picard fixed-point iteration, `K−1` iterations (`--proj-K`, default 3) |
 | `cfg_mp_anderson` | Anderson-accelerated (type-II, memory depth 1), mixing coefficient computed **per sample** |
 | `cfg_mp_anderson_gated` | Anderson, applied only for `t ∈ [tmin, tmax]` (default `[0.3, 0.7]`) |
+| `cfg_mp_icml` | direct competitor's operator ([arXiv:2601.21892](https://arxiv.org/abs/2601.21892)) `G(x) = x − ½Δt·v(t′,x,∅) + ½Δt·v(t′, x − ½Δt·v(t′,x,∅), y)` at the post-step time `t′`, iterated `K−1` times (default 2 = the paper's recommended FPI); **2 NFE per iteration** (the two forwards are sequential, not batchable) |
+| `cfg_mp_icml_anderson` | the same competitor `G` wrapped in the identical type-II Anderson (m=1, β=1) extrapolation; fixed 2 applications of `G` |
+| `cfg_mp_icml_anderson_gated` | `cfg_mp_icml_anderson` fired only for `t ∈ [tmin, tmax]` — **our time gate applied to the competitor's corrector**, showing the gating contribution transfers to CFG-MP+ |
+
+Two orthogonal flags:
+
+- `--w-schedule {constant,linear}` (default `constant`) — applies to `cfg` and every `cfg_mp_*` variant.
+  `linear` is the mean-preserving increasing ramp `w(t) = 1 + (w−1)·2t` (Wang et al.,
+  [arXiv:2404.13040](https://arxiv.org/abs/2404.13040)): starts at 1, ends at `2w−1`, averages `w` over `t ∈ [0,1]`.
+- `--fresh-anchor` — applies to `cfg_mp_std` / `cfg_mp_anderson` / `cfg_mp_anderson_gated`. Replaces the stale
+  anchor `v̄_∅ = v_θ(z_t, t, ∅)` with `v̄_∅ = v_θ(z_t + v_∅·dt, t′, ∅)`, the unconditional field re-evaluated at
+  `t′` at the **unconditional Euler continuation**. Both sides of the fixed-point condition then live at `t′`.
+  Costs **+1 NFE per corrected step**. (The anchor deliberately is *not* the guided post-predictor point `x⁰` —
+  that point is a fixed point of its own corrector, which would make the corrector a no-op.)
 
 ### NFE at `--num-steps 50`
 
-| Method | NFE / sample |
-|---|---|
-| `uncond` | 50 |
-| `cfg` (vanilla) | 100 |
-| `cfg_mp_std` (K=3) | 200 |
-| `cfg_mp_anderson` | 200 |
-| `cfg_mp_anderson_gated`, Middle `[0.3, 0.7]` | **142** (29% cheaper than full Anderson) |
+| Method | NFE / step | NFE / sample |
+|---|---|---|
+| `uncond` | 1 | 50 |
+| `cfg` (vanilla) | 2 | 100 |
+| `cfg_interval` `[0.3, 0.7]` | 2 in / 1 out | **71** |
+| `cfg_pp` | 2 | 100 |
+| `cfg_mp_std` (K=3) | 4 | 200 |
+| `cfg_mp_anderson` | 4 | 200 |
+| `cfg_mp_anderson_gated`, Middle `[0.3, 0.7]` | 4 in / 2 out | **142** (29% cheaper than full Anderson) |
+| `cfg_mp_icml` (K=3 → 2 iters) | 6 | 300 |
+| `cfg_mp_icml_anderson` | 6 | 300 |
+| `cfg_mp_icml_anderson_gated`, Middle `[0.3, 0.7]` | 6 in / 2 out | **184** (39% cheaper than ungated CFG-MP+) |
+
+Add `+1` NFE per corrected step for `--fresh-anchor` (e.g. `cfg_mp_anderson` → 250, gated-Middle → 163).
 
 At default settings `cfg_mp_std` and `cfg_mp_anderson` are NFE-matched, so that comparison is
 quality-at-matched-compute, not a speedup. NFE is logged per run to `generation_stats.json`.
@@ -76,7 +99,7 @@ Live code is at the repository root:
 | `train.py` | Flow-matching training loop (`accelerate`, bf16) |
 | `dataset.py` | CelebA-64 loading/preprocessing, `create_dataloader` |
 | `download_dataset.py` | Builds `./data/local_celeba` (`real_images/` + `attributes.pt`) |
-| `sample_generator.py` | **Canonical sampler** — all 5 methods, NFE accounting |
+| `sample_generator.py` | **Canonical sampler** — all 10 methods, NFE accounting |
 | `sample-cfg-mp.py`, `sample-vanilla-cfg.py` | Qualitative grid generation |
 | `evaluate_metrics.py` | FID + attribute accuracy |
 | `evaluation.sh` | 5-method comparison sweep |

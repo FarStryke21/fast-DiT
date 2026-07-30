@@ -12,7 +12,7 @@ Confirmed by searching the full git history for added `.json` / `.csv` / `.out` 
 
 **Do not source numbers from `performance/A100/*.out` or `performance/2A100/*.out`.** Those are dated May 2023, arrived in the repo's `Initial commit`, and are upstream fast-DiT's ImageNet *training-throughput* benchmarks (0.52–1.33 steps/sec, loss ≈ 0.17 on the DDPM objective). They have nothing to do with CFG, manifold projection, or CelebA.
 
-If the ablation CSVs still exist on the machine or cluster where the sweeps ran, they are the only surviving source — recover them before regenerating, since a re-run costs the full sweep.
+**Update 2026-07-30: the course-era CSVs/JSONs are confirmed lost.** Every quantitative result will be regenerated from scratch on the experiment server (RTX 5090) per the [Publication-Plan](Publication-Plan.md) — which is strictly better anyway: the old numbers mixed checkpoints (66k vs 72k), used the buggy `uncond` baseline, and lacked the vanilla-CFG sweep arm.
 
 ---
 

@@ -22,6 +22,7 @@ Fork remote: `https://github.com/FarStryke21/fast-DiT.git`, branch `main`, HEAD 
 | [Results](Results.md) | What was measured, what is (and is not) committed to the repo |
 | [Design-Decisions](Design-Decisions.md) | Running log of non-obvious choices, alternatives considered, rationale |
 | [Publication-Plan](Publication-Plan.md) | Positioning vs related work, required experiments, venue targets and dates |
+| [Theory-Notes](Theory-Notes.md) | Fixed-point analysis: contraction rates, stale-anchor bias, CFG-MP comparison, gating rationale |
 
 ---
 

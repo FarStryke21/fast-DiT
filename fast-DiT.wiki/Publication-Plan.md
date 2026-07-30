@@ -4,17 +4,20 @@ Drafted 2026-07-30. Goal: turn the course project into a publishable paper. Prim
 
 ---
 
-## 1. Thesis of the paper
+## 1. Thesis of the paper (reframed 2026-07-30: this is an *improvement-over-CFG-MP+* paper)
 
-> High-scale CFG drags the sampling trajectory off the model's own data manifold. A **training-free, per-step fixed-point corrector** — which restores self-consistency of the *unconditional* velocity field across each guided Euler step — recovers the fidelity lost to guidance without sacrificing conditioning accuracy. Anderson acceleration makes the corrector converge in two evaluations, and **time-gating** concentrates those evaluations in the mid-trajectory window where guidance actually does damage, so the whole mechanism costs ~40% extra NFE instead of 2×.
+The user's directive: CFG-MP/CFG-MP+ (arXiv:2601.21892, ICML 2026) is known, published prior work — the goal is to **beat it**, not to coexist with it.
 
-The paper's unit of claim is a point in **(NFE, FID, attribute-accuracy)** space; every comparison must be paired (same seed, same conditions) and NFE-annotated.
+> Manifold-projection correctors fix high-scale CFG's fidelity loss, but the published corrector (CFG-MP+) re-evaluates both guidance branches at every step of the trajectory. We show the same — or better — correction is available at a fraction of the cost: (i) a **single-branch corrector** that needs only unconditional evaluations (1 NFE/iteration vs 2, and their two forwards are sequential while ours is one forward per iteration, so the wall-clock gap is larger than the NFE gap); (ii) **time-gating**, which we show is a universal plug-in that also improves *their* corrector — correction only matters in the mid-trajectory window; (iii) a **principled anchor** and a contraction/stability analysis that the prior work lacks, yielding testable predictions (accuracy preservation of single-branch correction; the `s·dt < 2(1−t_max)` stability bound). Concrete headline: CFG-MP+ ≈ 300 NFE/sample at 50 steps; gated single-branch ≈ 142; gated CFG-MP+ (our plug-in applied to their method) ≈ 184.
 
-## 2. Contribution structure (revised 2026-07-30 after the related-work scan — see §3)
+The paper's unit of claim is a point in **(NFE, FID, attribute-accuracy)** space; every comparison must be paired (same seed, same conditions) and NFE-annotated. Secondary axis: wall-clock, now that inference checkpointing is fixed (their sequential double-forward loses there too).
 
-1. **The unconditional-only, stale-anchor corrector**: a trapezoidal self-consistency condition on the *unconditional* velocity field alone, costing **1 NFE per fixed-point iteration** — versus CFG-MP's operator (arXiv:2601.21892), which re-evaluates both the unconditional and conditional branches (2 NFE/iteration) and targets a different fixed point. This survives only as an explicit, empirically compared distinction from CFG-MP+.
-2. **Time-gating a per-step corrector** (guidance always on, corrector only for t ∈ [0.3, 0.7]): the scan found no prior work gating a manifold/consistency corrector to a mid-trajectory window. Framed as an *empirical finding* consistent with Kynkäänniemi et al. (2024) — the insight "the middle matters" is theirs; the transfer to a corrector and the concrete 200→142 NFE arithmetic is ours. Early/Late windows are falsification arms.
-3. **The empirical study**: attribute-conditioned (40 binary attributes), pixel-space, CelebA-64 — a regime none of the neighboring papers touch (all ImageNet-class or T2I latent-space). Paired-seed FID/accuracy/NFE protocol.
+## 2. Contribution structure (revised 2026-07-30; improvement-over-CFG-MP+ framing per the user)
+
+1. **Single-branch projection**: the corrector needs only the *unconditional* velocity field — a self-consistency condition costing **1 NFE/iteration** vs CFG-MP's 2 (and 1 sequential forward vs their 2). Theory-backed prediction: because our corrector cannot move the iterate along conditional directions, it preserves conditioning accuracy at least as well ([Theory-Notes §5](Theory-Notes.md)). Verified head-to-head in B3/E13.
+2. **Time-gating as a universal plug-in for projection correctors** (guidance always on, corrector only for t ∈ [0.3, 0.7]): no prior work gates a corrector by time, and we show it improves *both* our corrector (200→142 NFE) *and* CFG-MP+ itself (300→184 NFE). The insight "the middle matters" is Kynkäänniemi et al.'s; the transfer to correctors, the universality evidence, and the three-factor rationale ([Theory-Notes §7](Theory-Notes.md)) are ours. Early/Late windows are falsification arms.
+3. **Theory the prior work lacks**: contraction analysis with the `s·dt < 2(1−t_max)` stability bound; the residual decomposition identifying the stale-anchor bias as exactly the natural-drift term, motivating the principled (unconditional-continuation) fresh anchor; the linear-regime argument for why secant/Anderson dominates Picard precisely in the mid-trajectory contraction regime.
+4. **The empirical study**: attribute-conditioned (40 binary attributes), pixel-space CelebA-64 with paired-seed (NFE, FID, accuracy) protocol — plus the E13 head-to-head on CFG-MP+'s own benchmark family.
 
 **Explicitly NOT contributions** (established prior art, cite in the motivation): CFG's off-manifold diagnosis and training-free per-step projection as a thesis (CFG++, Rectified-CFG++, CFG-MP); Anderson acceleration of a CFG-corrector fixed point (CFG-MP+ does type-II, m=1 — exactly ours); mid-trajectory restriction as an insight (Kynkäänniemi et al.).
 
@@ -77,11 +80,11 @@ The paper's unit of claim is a point in **(NFE, FID, attribute-accuracy)** space
 | E11 | Seed robustness: 3 seeds for the headline configs | FID at N=1000 is noisy; error bars or at least seed-spread needed for any Δ < a few FID points. |
 | E12 | FID at N=5000–10000 for the 3–4 headline rows | Blunts the "N=1000 FID is biased" objection on the rows that matter. |
 
-### 4.3 Scale-up (decides venue ceiling)
+### 4.3 Scale-up (upgraded to near-must under the improvement framing)
 
 | # | Experiment | Why |
 |---|---|---|
-| E13 | Same corrector on a **public pretrained model** (e.g. SiT/DiT-XL-2 ImageNet-256, or SD-class latent flow model) — corrector is training-free and model-agnostic, so this is sampling-only compute | This single experiment moves the paper from "workshop/TMLR" toward "conference plausible". If it works on one pretrained model, the model-agnostic claim becomes real evidence rather than an assertion. |
+| E13 | Head-to-head vs CFG-MP+ on a **public pretrained model from their evaluation family** (DiT-XL/2 ImageNet-256 is their main setting; SiT variants also fine). Sampling-only compute — feasible on the 5090 (their K=2 corrector triples per-sample cost; budget FID at 10k samples). | An improvement claim over a published ICML method is only credible if demonstrated **on that method's own benchmark**, not only on our CelebA-64 testbed. This experiment decides whether the paper can target a main conference (ICLR 2027 / AISTATS 2027) instead of workshop/TMLR. |
 
 ### 4.4 Standing methodology rules
 
@@ -101,14 +104,15 @@ The paper's unit of claim is a point in **(NFE, FID, attribute-accuracy)** space
 
 ## 6. Timeline (~9 weeks to a TMLR submission)
 
-- **Weeks 1–2 (to ~Aug 13)**: land the restructure branch; recover any surviving ablation CSVs from the cluster before re-running; pick the method's new name; run E1–E2 + E4 + E7 at one checkpoint **and the two go/no-go baselines B1–B2** — the outcome decides whether the framing holds before any writing starts.
+- **Compute reality (2026-07-30)**: course-era numbers are lost; development happens on a MacBook (no meaningful compute), experiments run over SSH on an RTX 5090 server. Therefore: all sweeps must be scripted, resumable, and manifest-driven *before* the server session, so GPU time is pure execution.
+- **Weeks 1–2 (to ~Aug 13)**: land the restructure branch; implement B1–B4 as sampler methods + the one-shot experiment runner (in progress); pick the method's new name; then on the 5090: E1–E2 + E4 + E7 at one checkpoint **and the two go/no-go baselines B1–B2** — the outcome decides whether the framing holds before any writing starts.
 - **Weeks 3–4 (to ~Aug 27)**: E3, E5, E6, B3 (CFG-MP+ comparison). Freeze the 4-page workshop version; **submit to a NeurIPS workshop by Aug 29**.
 - **Weeks 5–7**: E8–E12; start E13 if a pretrained backbone is chosen.
 - **Weeks 8–9**: writing, figures (headline: FID-vs-accuracy curves with NFE annotations, both arms), TMLR submission.
 
 ## 7. Known risks
 
-1. **Scooping — realized, not hypothetical.** CFG-MP/CFG-MP+ (ICML 2026) anticipates the per-step fixed-point projection *and* the Anderson acceleration, and owns the name "CFG-MP". The paper survives only with the §2 repositioning (uncond-only cheaper map + corrector time-gating + rigorous small-scale study), an honest concurrent-work statement, and the B1–B3 baseline comparisons. Rename the method before anything is public.
+1. **The head-to-head must actually be won.** Framed as an improvement over CFG-MP+ (per the user's directive — they are known, published prior work, cited as such; no concurrent-work framing), the paper stands or falls on B3/E13: matched-quality-at-lower-NFE or better-quality-at-matched-NFE against their operator, on our testbed *and* on their benchmark family. If the single-branch corrector loses at matched NFE, the fallback contribution is "time-gating as a universal plug-in for projection correctors" (shown on their method) + the theory — still a paper, but a smaller one. Rename our method before anything is public ("CFG-MP" is their name).
 2. **The result itself** — no quantitative results survive in the repo; the central curve has never actually been measured with its baseline arm. The paper only exists if E1/E2 show separation.
 3. **FID noise at small N** — mitigated by E11/E12; avoid claiming deltas within noise.
 4. **Single-dataset, single-model evidence** — CelebA-64 + DiT-B/2 alone caps the venue at workshop/TMLR; E13 is the lever.

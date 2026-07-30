@@ -9,6 +9,8 @@ Three project-written samplers, plus two inherited ones that no longer work with
 | `sample-vanilla-cfg.py` | Qualitative grid, vanilla CFG only | `vanilla_cfg_{attrs}.png` |
 | `sample.py`, `sample_ddp.py` (now `legacy/`) | **Inherited from upstream, broken here** — they build a latent-space model (`input_size = image_size//8`, `in_channels=4`), use `create_diffusion` DDPM sampling and `AutoencoderKL`. Do not use. | — |
 
+> **2026-07-30, restructure branch — `sample_generator.py` grew six baseline/competitor methods and four flags** (see [Design-Decisions D11–D12](Design-Decisions.md)): `cfg_interval` (guidance interval, Kynkäänniemi et al.; 1 NFE outside `[--w-tmin, --w-tmax]` → 71 NFE/sample at defaults), `cfg_pp` (flow-matching CFG++ analogue; `--cfg-scale` is λ ∈ (0,1] for this method), `cfg_mp_icml` / `cfg_mp_icml_anderson` / `cfg_mp_icml_anderson_gated` (the CFG-MP operator of arXiv:2601.21892, verified against the paper; 2 NFE/iteration; gated variant applies our time gate to their corrector), plus `--w-schedule {constant,linear}`, `--fresh-anchor` (anchor at the unconditional continuation, +1 NFE per corrected step), `--proj-step-scale`, `--alpha-clamp`. `run_experiments.py` is the manifest runner covering the full experiment matrix (`--dry-run` to inspect). NFE/sample at 50 steps: icml 300, icml-gated-Middle 184, fresh-anchor Anderson 250 / gated 163.
+
 ---
 
 ## `sample_generator.py`
