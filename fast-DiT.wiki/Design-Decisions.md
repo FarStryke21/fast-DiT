@@ -6,6 +6,9 @@ Running log of non-obvious choices, with alternatives considered and rationale. 
 
 ## 2026-07-30 — Publication-restructure branch
 
+### D10. Repositioning after the related-work scan; method rename pending
+The scan found **CFG-MP/CFG-MP+ (arXiv:2601.21892, ICML 2026 poster)** — per-step fixed-point manifold projection for flow-matching CFG with the identical type-II depth-1 Anderson acceleration, under the same name this project has been using. Decisions: (1) Anderson is demoted from contribution to borrowed tool; (2) the paper repositions on the unconditional-only stale-anchor map (1 NFE/iter vs their 2), corrector time-gating (unclaimed in the literature), and the rigorous small-scale study; (3) baselines B1 (CFG++ analogue) and B2 (guidance interval) are go/no-go gates run before any writing; (4) the "CFG-MP" shorthand must be renamed — candidates UCC / GUCC / SCoG, user to pick. Full details in [Publication-Plan §2–3](Publication-Plan.md).
+
 ### D9. Wiki committed into the repo
 The `fast-DiT.wiki/` directory was previously untracked. Decision: commit it on this branch so the project documentation (and this decision log) is versioned alongside the code. Alternative — keeping it as a separate GitHub wiki repo — rejected for now: one repo, one history, and the wiki *is* the project's real documentation while `README.md` was upstream's. Note for merging: the untracked local copy in the main checkout must be removed (or moved aside) before merging this branch, or git will refuse to overwrite it.
 
