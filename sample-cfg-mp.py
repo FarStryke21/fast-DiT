@@ -108,7 +108,7 @@ def main(args):
                     v_proj, _ = v_proj.chunk(2, dim=1)
                     
                     # Nudge the latent back toward the unconditional manifold
-                    x = x + (v_proj - v_uncond) * dt * 0.5
+                    x = x + (v_proj - v_uncond) * dt * args.proj_step_scale
 
             elif args.mp_method == "anderson":
                 # Anderson Accelerated projection (Requires exactly 2 extra evaluations)
@@ -116,14 +116,14 @@ def main(args):
                 v_proj_1 = model(x, t_next, y_uncond, force_drop_ids=drop_ids_proj)
                 v_proj_1, _ = v_proj_1.chunk(2, dim=1)
                 
-                g_1 = x + (v_proj_1 - v_uncond) * dt * 0.5
+                g_1 = x + (v_proj_1 - v_uncond) * dt * args.proj_step_scale
                 f_1 = g_1 - x
 
                 # Eval 2
                 v_proj_2 = model(g_1, t_next, y_uncond, force_drop_ids=drop_ids_proj)
                 v_proj_2, _ = v_proj_2.chunk(2, dim=1)
                 
-                g_2 = g_1 + (v_proj_2 - v_uncond) * dt * 0.5
+                g_2 = g_1 + (v_proj_2 - v_uncond) * dt * args.proj_step_scale
                 f_2 = g_2 - g_1
 
                 # Anderson Mixing
@@ -169,5 +169,6 @@ if __name__ == "__main__":
     parser.add_argument("--proj-K", type=int, default=3, help="Number of projection steps (only used if mp-method is 'standard')")
     parser.add_argument("--tmin", type=float, default=0.0, help="Minimum time for speciation phase")
     parser.add_argument("--tmax", type=float, default=1.0, help="Maximum time for speciation phase")
+    parser.add_argument("--proj-step-scale", type=float, default=0.5, help="Corrector step size as a fraction of dt (previously hard-coded 0.5)")
     args = parser.parse_args()
     main(args)

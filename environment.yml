@@ -12,3 +12,8 @@ dependencies:
     - diffusers
     - accelerate
     - tqdm
+    - datasets
+    - pytorch-fid
+    - huggingface_hub
+    - scikit-learn
+    - pandas

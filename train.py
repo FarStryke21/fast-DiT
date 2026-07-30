@@ -29,7 +29,6 @@ import os
 from accelerate import Accelerator
 
 from models import DiT_models
-from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
 
 from dataset import create_dataloader
@@ -154,8 +153,6 @@ def main(args):
             logger.info(f"Experiment directory created at {experiment_dir}")
 
     # Create model:
-    assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
-    latent_size = args.image_size // 8
     model = DiT_models[args.model](
         input_size=args.image_size,
         in_channels=3,
@@ -165,7 +162,6 @@ def main(args):
     model = model.to(device)
     ema = deepcopy(model).to(device)  # Create an EMA of the model for use after training
     requires_grad(ema, False)
-    diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule
     # vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     if accelerator.is_main_process:
         logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")

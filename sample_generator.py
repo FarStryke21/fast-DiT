@@ -60,7 +60,10 @@ def main(args):
 
                 # Predictor Step
                 if args.method == "uncond":
-                    v = model(z, t, y_uncond)
+                    # force_drop_ids selects the learned null_token; without it the model
+                    # would be conditioned on the all-negative attribute vector instead
+                    drop_all = torch.ones(current_batch_size, dtype=torch.bool, device=device)
+                    v = model(z, t, y_uncond, force_drop_ids=drop_all)
                     v, _ = v.chunk(2, dim=1)
                     x = z + v * dt
                     nfe_total += current_batch_size 
@@ -89,28 +92,30 @@ def main(args):
 
                     if args.method == "cfg_mp_std":
                         for k in range(1, args.proj_K):
-                            v_proj = model(x, t_next, y_uncond, force_drop_ids=drop_ids_proj) 
+                            v_proj = model(x, t_next, y_uncond, force_drop_ids=drop_ids_proj)
                             v_proj, _ = v_proj.chunk(2, dim=1)
-                            x = x + (v_proj - v_uncond_out) * dt * 0.5
+                            x = x + (v_proj - v_uncond_out) * dt * args.proj_step_scale
                             nfe_total += current_batch_size
 
                     elif "anderson" in args.method:
                         v_proj_1 = model(x, t_next, y_uncond, force_drop_ids=drop_ids_proj)
                         v_proj_1, _ = v_proj_1.chunk(2, dim=1)
-                        g_1 = x + (v_proj_1 - v_uncond_out) * dt * 0.5
+                        g_1 = x + (v_proj_1 - v_uncond_out) * dt * args.proj_step_scale
                         f_1 = g_1 - x
 
                         v_proj_2 = model(g_1, t_next, y_uncond, force_drop_ids=drop_ids_proj)
                         v_proj_2, _ = v_proj_2.chunk(2, dim=1)
-                        g_2 = g_1 + (v_proj_2 - v_uncond_out) * dt * 0.5
+                        g_2 = g_1 + (v_proj_2 - v_uncond_out) * dt * args.proj_step_scale
                         f_2 = g_2 - g_1
 
                         delta_f = f_2 - f_1
-                        alpha = (torch.sum(f_2.view(current_batch_size, -1) * delta_f.view(current_batch_size, -1), dim=1) / 
+                        alpha = (torch.sum(f_2.view(current_batch_size, -1) * delta_f.view(current_batch_size, -1), dim=1) /
                                 (torch.sum(delta_f.view(current_batch_size, -1) * delta_f.view(current_batch_size, -1), dim=1) + 1e-8)).view(current_batch_size, 1, 1, 1)
-                        
+                        if args.alpha_clamp is not None:
+                            alpha = alpha.clamp(-args.alpha_clamp, args.alpha_clamp)
+
                         x = g_2 - alpha * (g_2 - g_1)
-                        nfe_total += 2 * current_batch_size 
+                        nfe_total += 2 * current_batch_size
 
                 z = x
 
@@ -137,7 +142,10 @@ def main(args):
     }
     
     if "mp" in args.method:
-        stats["proj_K"] = args.proj_K if args.method == "cfg_mp_std" else 2 
+        stats["proj_K"] = args.proj_K if args.method == "cfg_mp_std" else 2
+        stats["proj_step_scale"] = args.proj_step_scale
+        if args.alpha_clamp is not None:
+            stats["alpha_clamp"] = args.alpha_clamp
     if "gated" in args.method:
         stats["tmin"] = args.tmin
         stats["tmax"] = args.tmax
@@ -159,6 +167,8 @@ if __name__ == "__main__":
     parser.add_argument("--cfg-scale", type=float, default=4.0)
     parser.add_argument("--num-steps", type=int, default=50)
     parser.add_argument("--proj-K", type=int, default=3)
+    parser.add_argument("--proj-step-scale", type=float, default=0.5, help="Corrector step size as a fraction of dt (previously hard-coded 0.5)")
+    parser.add_argument("--alpha-clamp", type=float, default=None, help="Clamp Anderson mixing coefficient to [-c, c]; None keeps the original unclamped behaviour")
     parser.add_argument("--tmin", type=float, default=0.3)
     parser.add_argument("--tmax", type=float, default=0.7)
     parser.add_argument("--model", type=str, default="DiT-B/2")
