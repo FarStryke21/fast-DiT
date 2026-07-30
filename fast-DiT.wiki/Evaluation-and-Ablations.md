@@ -1,5 +1,7 @@
 # Evaluation and Ablations
 
+> **2026-07-30 update:** every sweep described in §2–§5 is now driven by **`run_experiments.py`** (manifest of ~50 deduplicated, resumable runs covering the full [Publication-Plan §4](Publication-Plan.md) matrix; `python run_experiments.py --ckpt <ckpt> --dry-run` to inspect). The scripts named below — `evaluation.sh`, `ablations.py`, `time_ablation.sh` — are retired to `legacy/` and kept for provenance; their protocol descriptions remain valid documentation of *what* is measured and why. The §1 metrics description is current.
+
 ## 1. Metrics (`evaluate_metrics.py`)
 
 Two axes, deliberately opposed — the whole thesis is about the trade-off between them.

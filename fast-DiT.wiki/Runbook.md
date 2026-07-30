@@ -62,7 +62,18 @@ python sample-cfg-mp.py --ckpt $CKPT --attributes Male Chubby Blond_Hair \
 
 Filenames are auto-derived (`vanilla_cfg_{attrs}.png`, `cfg_mp_{method}_{attrs}.png`) and **collide across CFG scales** — rename immediately (the committed `_3` / `_8` suffixes were added by hand).
 
-## 4. Five-method comparison
+## 4. Running the full experiment matrix (current entry point)
+
+```bash
+python run_experiments.py --ckpt results/000-DiT-B-2/checkpoints/0072000.pt --dry-run   # inspect the plan
+python run_experiments.py --ckpt results/000-DiT-B-2/checkpoints/0072000.pt             # default tiers: must,baseline (37 runs)
+python run_experiments.py --ckpt <ckpt> --tiers must,baseline,should                    # everything (50 runs)
+python run_experiments.py --ckpt <ckpt> --only cfg_mp_icml                              # substring-filtered subset
+```
+
+Resumable (re-invoking skips completed runs), failure-isolated (one bad run doesn't kill the sweep), and aggregates everything into `results_summary.csv` / `results_summary.json` — both committable. §§4a–6 below document the underlying per-run commands and the retired course-era scripts.
+
+## 4a. Five-method comparison (manual form)
 
 ```bash
 CKPT=results/000-DiT-B-2/checkpoints/0072000.pt   # prefer 72k for consistency with the ablations
@@ -81,29 +92,15 @@ for M in uncond cfg cfg_mp_std cfg_mp_anderson cfg_mp_anderson_gated; do
 done
 ```
 
-(`evaluation.sh` does this but has the generation block commented out and points at the 66k checkpoint. Note also that `uncond` writes to `samples_uncond_w4.0_steps50` — the `w` in the name is the CLI default, not a guidance scale that was applied.)
+(`legacy/evaluation.sh` did this but has the generation block commented out and points at the 66k checkpoint — retired; use `run_experiments.py`. Note also that `uncond` writes to `samples_uncond_w4.0_steps50` — the `w` in the name is the CLI default, not a guidance scale that was applied.)
 
 Expected NFE per sample: **50 / 100 / 200 / 200 / 142**.
 
-## 5. Ablation A — CFG scale
+## 5. Ablations A (CFG scale) and B (time gating) — retired scripts
 
-```bash
-python ablations.py     # Phase 1 only — Phase 2 is broken, see Gotchas §2
-```
+Both sweeps are rows in the `run_experiments.py` manifest (tags E1/E2 and E5). The retired course-era entry points are `legacy/ablations.py` (Phase 2 `--out-dir` bug was fixed on this branch before retirement) and `legacy/time_ablation.sh`.
 
-Sweeps `w ∈ {2,4,6,8}` on `cfg_mp_anderson_gated` with gate `[0.3, 0.7]`. Edit `CKPT`, `SAMPLES`, `STEPS` at the top of the file. Writes `ablation_summary_{timestamp}.csv`.
-
-To run Phase 1 alone safely, either patch in `--out-dir` (recommended, one line per command) or `return` after Phase 1.
-
-## 6. Ablation B — time gating
-
-```bash
-./time_ablation.sh
-```
-
-Runs Early `[0,0.3]`, Middle `[0.3,0.7]`, Late `[0.7,1.0]`, Full `[0,1]` at `w=4.0`, each into its own `samples_gated_{Name}_w4.0/` with `--out-dir` passed to both generator and evaluator. Per-run results land in `samples_gated_{Name}_w4.0/evaluation_results.json` and `generation_stats.json` — **this script does not aggregate**, collect the four JSON pairs manually.
-
-Sanity check: the **Full** row must match the `cfg_mp_anderson` row from §4 exactly (200 NFE, same FID, same accuracy).
+Sanity check that survives the migration: the **Full-gate** `[0,1]` row must match the `cfg_mp_anderson` row exactly (200 NFE, same FID, same accuracy) — the runner includes both.
 
 ## 7. Publish the checkpoint
 
@@ -127,10 +124,11 @@ Requires `huggingface-cli login`. Edit `local_file_path` in the file to change w
 | Per-run conditions | `samples_*/conditions.pt` | yes (`*.pt`) |
 | NFE log | `samples_*/generation_stats.json` | yes (`*.json`) |
 | Metrics | `samples_*/evaluation_results.json` | yes (`*.json`) |
-| Ablation table | `ablation_summary_*.csv` | **no** — but none is committed |
-| Qualitative grids | `images/`, repo root | no |
+| Per-run outputs (runner) | `experiment_runs/<run_id>/` | yes (`experiment_runs/`) |
+| **Aggregated results** | `results_summary.csv`, `results_summary.json` | **no — commit these.** (`.gitignore` has an explicit `!results_summary.json` exception to the blanket `*.json` rule) |
+| Qualitative grids | `images/` | no |
 
-**Everything numeric is gitignored.** If results need to survive, either commit the CSV explicitly (`git add -f`) or copy the JSONs somewhere outside the ignore patterns.
+Per-run JSONs remain gitignored; the aggregated summary is the survivable artifact — **commit `results_summary.*` after every server session** so the numbers can never be lost again (course-era numbers died to the old blanket ignore).
 
 ## External assets
 

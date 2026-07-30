@@ -6,6 +6,9 @@ Running log of non-obvious choices, with alternatives considered and rationale. 
 
 ## 2026-07-30 — Publication-restructure branch
 
+### D13. Root cleanup: one sweep entry point, no stray artifacts
+User asked for a repo cleanup (2026-07-30). Decisions: (1) `ablations.py`, `evaluation.sh`, `time_ablation.sh` retired to `legacy/` — all three are strict subsets of the `run_experiments.py` manifest, and keeping parallel sweep entry points invites config drift (the checkpoint inconsistency of Gotchas §12 was exactly this failure mode); (2) the three root PNGs moved to `images/`; (3) `chkp66/` scratch dir removed, `.vscode/` untracked, `.DS_Store` ignored; (4) `.gitignore` now ignores `experiment_runs/` (bulk per-run outputs) but explicitly **excepts `results_summary.json`** from the blanket `*.json` rule — aggregated numbers are meant to be committed after every server session, so results can never be silently lost again (the course-era loss was caused by the old blanket ignore).
+
 ### D12. Improvement framing (user directive) and the head-to-head toolkit
 The user confirmed CFG-MP/CFG-MP+ is known, published prior work and the goal is to **improve on it**. Consequences: (1) their operator was implemented in `sample_generator.py` (`cfg_mp_icml`, verified against arXiv:2601.21892 v2 — 2 NFE/iteration, both velocities at t_{i+1}, AA(1,1) Anderson; their two forwards are *sequential*, unbatchable, so wall-clock favors us beyond NFE); (2) our time gate was also applied to *their* corrector (`cfg_mp_icml_anderson_gated`) to support "gating is a universal plug-in"; (3) E13 (their benchmark family, pretrained DiT-XL/2) upgraded to near-must. Convention note: `--proj-K` keeps the repo's K−1 semantics for all methods, so `proj_K=3` = the CFG-MP paper's recommended FPI=2 — the runner was corrected after initially passing `proj_K=2` (1 iteration) for B3.
 

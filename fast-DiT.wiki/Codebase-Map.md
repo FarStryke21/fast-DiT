@@ -2,22 +2,21 @@
 
 The repo is a fork three generations deep (Meta DiT → `chuanyangjin/fast-DiT` → this project). Roughly half the files are inherited and inert. This page separates them.
 
-## Live — written or substantially rewritten for this project
+## Live — the working surface after the 2026-07-30 cleanup
 
 | File | Role |
 |---|---|
-| `models.py` | DiT backbone. **Project change**: `MultiLabelEmbedder` (lines 97-124) + wiring at line 201. Everything else is upstream. |
-| `train.py` | Flow-matching training loop (lines 251-272 are the rewrite), Accelerate/bf16, EMA, resume. |
+| `models.py` | DiT backbone. **Project change**: `MultiLabelEmbedder` (lines 97-124) + wiring at line 201; inference no longer pays gradient checkpointing. Everything else is upstream. |
+| `train.py` | Flow-matching training loop, Accelerate/bf16, EMA, resume (dead DDPM/VAE leftovers removed on the restructure branch). |
 | `dataset.py` | CelebA loader with full-split RAM tensor caching, HF-hub / Arrow / local-dir modes, attribute extraction. Written for this project (commit `4f88c1d`). |
 | `download_dataset.py` | Dumps the FID reference set (`real_images/`) and the conditioning pool (`attributes.pt`). |
-| **`sample_generator.py`** | **The core artifact.** All five sampling methods + NFE accounting. Everything quantitative comes from here. |
+| **`sample_generator.py`** | **The core artifact.** All eleven sampling methods (ours + competitor baselines, see [Sampling-Scripts](Sampling-Scripts.md)) + exact NFE accounting. Everything quantitative comes from here. |
+| **`run_experiments.py`** | **The sweep entry point.** Manifest-driven, resumable runner for the full publication matrix; `--dry-run` to inspect; aggregates to `results_summary.csv/json` (committable — `.gitignore` has an exception). Supersedes `legacy/ablations.py`, `legacy/evaluation.sh`, `legacy/time_ablation.sh`. |
 | `sample-cfg-mp.py` | Qualitative grids with the MP corrector, attribute names on the CLI. |
 | `sample-vanilla-cfg.py` | Qualitative grids, vanilla CFG. |
 | `evaluate_metrics.py` | FID + attribute accuracy via the HF ResNet-18 classifier. |
-| `evaluation.sh` | Five-method comparison at w=4.0, ckpt 66k. |
-| `ablations.py` | CFG-scale sweep (vanilla + gated arms, paired) + gate sweep, aggregates to CSV. Phase 2 `--out-dir` bug fixed and vanilla baseline arm added on the restructure branch. |
-| `time_ablation.sh` | Gate sweep done correctly, with `--out-dir`. |
 | `hf_push.py` | Uploads `0100000.pt` to `FarStryke21/cmu-10799-dit-b2`. |
+| `images/` | All committed qualitative grids (the three final-push triptych PNGs moved here from the repo root). |
 
 ## Inherited and **inert** — do not treat as project code
 
@@ -41,8 +40,7 @@ The repo is a fork three generations deep (Meta DiT → `chuanyangjin/fast-DiT` 
 | Path | Contents |
 |---|---|
 | `images/` | Nine committed qualitative grids (see [Sampling-Scripts](Sampling-Scripts.md#committed-qualitative-artifacts)) |
-| repo root `*.png` | Final-push triptych: `vanilla_cfg_Male_Chubby_Blond_Hair_3.png`, `_8.png`, `cfg_mp_anderson_Male_Chubby_Blond_Hair.png` |
-| `chkp66/` | Empty but for a `.gitignore` containing `*.png` — a scratch dir for checkpoint-66k sample grids |
+| `images/` (final-push triptych) | `vanilla_cfg_Male_Chubby_Blond_Hair_3.png`, `_8.png`, `cfg_mp_anderson_Male_Chubby_Blond_Hair.png` — moved from the repo root in the cleanup; `chkp66/` (an empty scratch dir) was removed at the same time |
 
 ## What `.gitignore` excludes (and why there are no numbers in the repo)
 

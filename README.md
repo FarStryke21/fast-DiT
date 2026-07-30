@@ -82,7 +82,7 @@ Anderson-corrected sampler at the same seed:
 
 | vanilla CFG (low scale) | vanilla CFG (high scale) | CFG + Anderson corrector |
 |---|---|---|
-| ![](vanilla_cfg_Male_Chubby_Blond_Hair_3.png) | ![](vanilla_cfg_Male_Chubby_Blond_Hair_8.png) | ![](cfg_mp_anderson_Male_Chubby_Blond_Hair.png) |
+| ![](images/vanilla_cfg_Male_Chubby_Blond_Hair_3.png) | ![](images/vanilla_cfg_Male_Chubby_Blond_Hair_8.png) | ![](images/cfg_mp_anderson_Male_Chubby_Blond_Hair.png) |
 
 The high-scale vanilla grid shows the textbook off-manifold signature — pushed saturation, hardened edges,
 backgrounds collapsing to flat colour. The corrected grid sits closer to the low-scale grid in colour and
@@ -102,9 +102,7 @@ Live code is at the repository root:
 | `sample_generator.py` | **Canonical sampler** — all 10 methods, NFE accounting |
 | `sample-cfg-mp.py`, `sample-vanilla-cfg.py` | Qualitative grid generation |
 | `evaluate_metrics.py` | FID + attribute accuracy |
-| `evaluation.sh` | 5-method comparison sweep |
-| `ablations.py` | CFG-scale sweep (vanilla baseline + gated corrector) and gate sweep |
-| `time_ablation.sh` | Time-gating sweep (Early / Middle / Late / Full) |
+| `run_experiments.py` | Manifest-driven, resumable runner for the full experiment matrix (`--dry-run` to inspect; aggregates to `results_summary.csv`) |
 | `hf_push.py` | Uploads a checkpoint to the Hub |
 
 - `legacy/` — inert code inherited from the upstream forks. Not imported, not executed. See `legacy/README.md`.
@@ -156,14 +154,18 @@ python evaluate_metrics.py \
   --classifier FarStryke21/celeba-resnet18-classifier
 ```
 
-**5. Sweeps** — `ablations.py` sweeps `w ∈ {2,4,6,8}` for both vanilla CFG and the gated corrector, then the
-gating windows, and writes `ablation_summary_{timestamp}.csv`. `time_ablation.sh` runs the gate sweep alone
-(configuration is edited at the top of the script).
+**5. Sweeps** — `run_experiments.py` is a manifest-driven, resumable runner that walks the full publication
+experiment matrix (see `fast-DiT.wiki/Publication-Plan.md`), calling `sample_generator.py` then
+`evaluate_metrics.py` for each entry, skipping work already done on disk, and aggregating everything into
+`results_summary.csv` / `results_summary.json`.
 
 ```bash
-python ablations.py --ckpt results/000-DiT-B-2/checkpoints/0072000.pt
-./time_ablation.sh
+python run_experiments.py --ckpt results/000-DiT-B-2/checkpoints/0072000.pt --dry-run
+python run_experiments.py --ckpt results/000-DiT-B-2/checkpoints/0072000.pt --tiers must,baseline
 ```
+
+Other flags: `--only <substring>` (restrict to run_ids containing it), `--samples` (1000), `--batch` (100),
+`--steps` (50).
 
 ## Evaluation protocol
 

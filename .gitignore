@@ -214,6 +214,11 @@ features
 data
 
 *.json
+!results_summary.json
 *.pt
 
 samples_*/
+
+.DS_Store
+.vscode/
+experiment_runs/
